@@ -25,7 +25,34 @@ A GUI application for parsing and visualizing Azure Network Security Group (NSG)
 - **Responsive UI**: Auto-sizing window and column widths based on content
 
 ## ToDo
-- NSG flow logs
+- NSG flow logs support (currently only vNet flow logs are supported)
+
+  ## App Window description
+
+### Main Window
+- Displays list of JSON files in current directory and subdirectories
+- File browser with scrollbar
+- Control buttons: "Open Selected" (open hihghlited file from list), "Refresh File List" (refresh the list), "Open Other" (opens files from the file system)
+- Status bar showing application status
+
+### Data Display Window
+- **Title**: Shows filename being displayed
+- **Search Bar**: Real-time filtering with partial/quoted exact matching
+- **Table View**: Treeview displaying parsed flow records with all fields
+- **Highlighting**: Denied flows (flowState = D) shown in light red background
+- **Buttons**: Copy to clipboard (CSV or Excel format), Close
+
+## Usage
+
+1. Run the application in the directory containing your NSG flow log JSON files. You can run it by opening a command prompt and executing 'python NSGFlowLogReader.py'
+2. Double-click or select files and click "Open Selected", or highlight a file and click 'Open Selected File' button
+3. Browse and search through network flow records
+4. Use copy buttons to export data for analysis
+
+## Requirements
+
+- Python 3.x
+- Tkinter (usually included with Python)
 
 ## Tuple Fields Description
 
@@ -44,31 +71,6 @@ Each flow tuple contains 13 fields in the following order:
 12. **packetsDstToSrc** - Number of packets from destination to source
 13. **bytesDestToSrc** - Number of bytes from destination to source
 
-## Windows
 
-### Main Window
-- Displays list of JSON files in current directory and subdirectories
-- File browser with scrollbar
-- Control buttons: "Open Selected", "Refresh File List", "Open Other"
-- Status bar showing application status
-
-### Data Display Window
-- **Title**: Shows filename being displayed
-- **Search Bar**: Real-time filtering with partial/quoted exact matching
-- **Table View**: Treeview displaying parsed flow records with all fields
-- **Highlighting**: Denied flows (flowState = D) shown in light red background
-- **Buttons**: Copy to clipboard (CSV or Excel format), Close
-
-## Usage
-
-1. Run the application in the directory containing your NSG flow log JSON files
-2. Double-click or select files and click "Open Selected"
-3. Browse and search through network flow records
-4. Use copy buttons to export data for analysis
-
-## Requirements
-
-- Python 3.x
-- Tkinter (usually included with Python)
 
 The application is designed for security analysts and network administrators to examine NSG flow logs for troubleshooting and monitoring network traffic patterns.
