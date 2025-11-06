@@ -2,12 +2,24 @@
 
 A GUI application for parsing and visualizing Azure Network Security Group (NSG) Flow Logs from JSON files.
 
+## Requirements
+
+- Python 3.x
+- Tkinter (usually included with Python)
+- Raw vNet flow logs in JSON format in the same folder (or subfolders) as the script
+
+## Usage
+
+1. Run the application in the directory containing your NSG flow log JSON files. You can run it by opening a command prompt and executing 'python NSGFlowLogReader.py'
+2. Double-click or select files and click "Open Selected", or highlight a file and click 'Open Selected File' button
+3. Browse and search through network flow records
+4. Use copy buttons to export data for analysis
+
+
 <img width="1377" height="785" alt="image" src="https://github.com/user-attachments/assets/cc223cf8-40b2-440b-afad-8d57955ea7fb" />
 
 
-
 ## Features
-
 - **File Management**: Automatically loads all JSON files from current directory and subdirectories
 - **Data Parsing**: Converts vNet flow log records into readable format with:
   - Protocol mapping (6 → TCP, 17 → UDP)
@@ -27,7 +39,7 @@ A GUI application for parsing and visualizing Azure Network Security Group (NSG)
 ## ToDo
 - NSG flow logs support (currently only vNet flow logs are supported)
 
-  ## App Window description
+## App Windows description
 
 ### Main Window
 - Displays list of JSON files in current directory and subdirectories
@@ -42,17 +54,6 @@ A GUI application for parsing and visualizing Azure Network Security Group (NSG)
 - **Highlighting**: Denied flows (flowState = D) shown in light red background
 - **Buttons**: Copy to clipboard (CSV or Excel format), Close
 
-## Usage
-
-1. Run the application in the directory containing your NSG flow log JSON files. You can run it by opening a command prompt and executing 'python NSGFlowLogReader.py'
-2. Double-click or select files and click "Open Selected", or highlight a file and click 'Open Selected File' button
-3. Browse and search through network flow records
-4. Use copy buttons to export data for analysis
-
-## Requirements
-
-- Python 3.x
-- Tkinter (usually included with Python)
 
 ## Tuple Fields Description
 
