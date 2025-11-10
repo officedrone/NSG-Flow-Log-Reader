@@ -468,6 +468,11 @@ class JSONViewerApp:
                 if row.get('flowState', '') == 'D (Deny)':
                     tree.item(item_id, tags='deny')
 
+                # Apply platform rule tag if rule is 'PlatformRule'
+                if row.get('rule', '') == 'PlatformRule':
+                    tree.item(item_id, tags='platform_rule')
+
+
         def filter_data(event=None):
             search_term = self.search_var.get().strip()
 
@@ -528,6 +533,9 @@ class JSONViewerApp:
 
         # Configure tags for highlighting
         tree.tag_configure("deny", background="#ffcccc")  # Light red for deny flows
+        tree.tag_configure("platform_rule", background="#add8e6")  # Light blue for PlatformRule
+
+
 
         def copy_to_clipboard():
             if not data:
