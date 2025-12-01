@@ -96,57 +96,117 @@ class JSONViewerApp:
         main_frame = ttk.Frame(self.root, padding=10)
         main_frame.pack(fill='both', expand=True)
 
-        # Title
-        title_label = ttk.Label(main_frame, text="NSG Flow Log JSON Viewer", font=('Helvetica', 16, 'bold'))
+        # -------------------------------------------------
+        # Title 
+        # -------------------------------------------------
+        title_label = ttk.Label(main_frame,
+                                text="NSG Flow Log JSON Viewer",
+                                font=('Helvetica', 16, 'bold'))
         title_label.pack(pady=(0, 10))
 
-        # File listbox with scrollbar
-        file_frame = ttk.Frame(main_frame)
-        file_frame.pack(padx=10, pady=5, fill='both', expand=True)
+        # -----------------------------------------------------------------
+        # OUTER frame that will contain the file list + search controls
+        # -----------------------------------------------------------------
+        search_outer = ttk.Frame(main_frame, relief='groove', borderwidth=2)
+        search_outer.pack(fill='both', expand=True, padx=5, pady=5)
 
-        # Add description label above file list
-        files_label = ttk.Label(file_frame, text="Files in current folder/subfolders", font=('Helvetica', 10, 'bold'))
-        files_label.pack(pady=(0, 5), anchor='w')
+        # -----  “Files in current folder/subfolders” label -----
+        files_label = ttk.Label(search_outer,
+                               text="Files in current folder/subfolders",
+                               font=('Helvetica', 10, 'bold'))
+        files_label.pack(pady=(8, 2), anchor='w')   # small top margin
+
+        # ----- Listbox + vertical scrollbar -----
+        file_frame = ttk.Frame(search_outer)
+        file_frame.pack(fill='both', expand=True, padx=5)
 
         self.file_listbox = tk.Listbox(file_frame, height=10, width=60)
-        file_scrollbar = ttk.Scrollbar(file_frame, orient='vertical', command=self.file_listbox.yview)
+        file_scrollbar = ttk.Scrollbar(file_frame,
+                                      orient='vertical',
+                                      command=self.file_listbox.yview)
         self.file_listbox.config(yscrollcommand=file_scrollbar.set)
 
-        # Bind double-click event to open selected file
+        # double‑click → open selected file
         self.file_listbox.bind('<Double-Button-1>', self.on_file_double_click)
 
         self.file_listbox.pack(side='left', fill='both', expand=True)
         file_scrollbar.pack(side='right', fill='y')
 
+        # ----- Search / Clear‑filter controls  -----
+        search_section = ttk.Frame(search_outer)
+        search_section.pack(fill='x', padx=5, pady=(8, 8))
 
+        # Source entry
+        ttk.Label(search_section, text="Source:").grid(row=0, column=0,
+                                                     sticky='e', padx=2, pady=2)
+        self.src_entry = ttk.Entry(search_section, width=20)
+        self.src_entry.grid(row=0, column=1, sticky='w', padx=2, pady=2)
 
-        # Control frame for buttons
+        # Destination entry
+        ttk.Label(search_section, text="Destination:").grid(row=0,
+                                                          column=2,
+                                                          sticky='e',
+                                                          padx=2, pady=2)
+        self.dst_entry = ttk.Entry(search_section, width=20)
+        self.dst_entry.grid(row=0, column=3, sticky='w', padx=2, pady=2)
+
+        # Destination Port entry
+        ttk.Label(search_section,
+                  text="Destination Port:").grid(row=0, column=4,
+                                                sticky='e',
+                                                padx=2, pady=2)
+        self.port_entry = ttk.Entry(search_section, width=10)
+        self.port_entry.grid(row=0, column=5, sticky='w', padx=2, pady=2)
+
+        # Search button
+        self.search_files_btn = ttk.Button(
+            search_section,
+            text="Search in Files",
+            command=self.search_in_files)
+        self.search_files_btn.grid(row=0, column=6, padx=8, pady=2)
+
+        # Clear Filter button (clears entries + restores full list)
+        self.clear_filter_btn = ttk.Button(
+            search_section,
+            text="Clear Filter",
+            command=self._clear_main_filters_and_restore)
+        self.clear_filter_btn.grid(row=0, column=7, padx=8, pady=2)
+
+        # -----------------------------------------------------------------
+        # Control buttons (Open Selected / Refresh / Open Other) – unchanged
+        # -----------------------------------------------------------------
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(pady=5, fill='x')
 
         self.open_selected_btn = ttk.Button(
             control_frame,
             text="Open Selected",
-            command=self.open_selected_files
-        )
+            command=self.open_selected_files)
         self.open_selected_btn.pack(side='left', padx=5)
 
-        self.refresh_btn = ttk.Button(control_frame, text="Refresh File List", command=self.refresh_files)
+        self.refresh_btn = ttk.Button(control_frame,
+                                      text="Refresh File List",
+                                      command=self.refresh_files)
         self.refresh_btn.pack(side='left', padx=5)
 
-        self.open_btn = ttk.Button(control_frame, text="Open Other", command=self.open_files)
+        self.open_btn = ttk.Button(control_frame,
+                                   text="Open Other",
+                                   command=self.open_files)
         self.open_btn.pack(side='left', padx=5)
 
-
-        # Load existing JSON files
+        # -----------------------------------------------------------------
+        # Load files, auto‑size window, status bar – unchanged
+        # -----------------------------------------------------------------
         self.load_existing_json_files()
-
-        # Auto-size window based on longest filename
         self.auto_size_window()
 
-        # Status bar (bottom of window)
-        self.status_bar = ttk.Label(self.root, text="Ready", relief=tk.SUNKEN, anchor='w')
+        self.status_bar = ttk.Label(self.root,
+                                    text="Ready",
+                                    relief=tk.SUNKEN,
+                                    anchor='w')
         self.status_bar.pack(side='bottom', fill='x')
+
+
 
 
     def on_file_double_click(self, event):
@@ -194,35 +254,40 @@ class JSONViewerApp:
 
 
     def _autosize_tree_columns(self, tree, columns, data):
-        """Helper method to autosize treeview columns based on content"""
-        if not data or not tree.get_children():
+        """
+        Resize each Treeview column so that it is wide enough for:
+          • the column heading text
+          • the longest cell value in that column (across all rows)
+        The width is expressed in pixels; a small buffer is added to avoid clipping.
+        """
+        if not data or not columns:
             return
 
-        # Get the first item to check column widths
-        try:
-            first_item = tree.get_children()[0]
-            values = tree.item(first_item)['values']
+        # Helper: get pixel width of a string using the default treeview font
+        def text_width(txt):
+            # Approximate 1 character ≈ 7‑8 pixels for the default Tk font.
+            # Using 7.5 gives a good balance on most platforms.
+            return int(len(txt) * 7.5)
 
-            for i, col in enumerate(columns):
-                # Get header width
-                header_width = len(col) * 8
+        buffer_px = 12          # extra space so text never touches the edge
+        min_width  = 80         # we never go smaller than this
+        max_width  = 500        # optional hard cap to keep the UI sane
 
-                # Check data width for this column across all rows
-                max_width = header_width
-                for row in data:
-                    cell_value = str(row.get(col, ''))
-                    cell_width = len(cell_value) * 8
-                    if cell_width > max_width:
-                        max_width = cell_width
+        for col in columns:
+            # Start with header width
+            best = text_width(col)
 
-                # Add generous buffer space (25 pixels) to ensure no content is cut off
-                buffer_space = 25
-                final_width = max_width + buffer_space
+            # Scan every row for the longest value in this column
+            for row in data:
+                cell = str(row.get(col, ""))
+                w = text_width(cell)
+                if w > best:
+                    best = w
 
-                # Set column width with reasonable bounds - minimum 100px, maximum 500px
-                tree.column(col, width=max(100, min(final_width, 500)))
-        except Exception:
-            pass  # If there's an error, just leave default sizing
+            # Apply buffer and limits
+            final_w = max(min_width, min(best + buffer_px, max_width))
+            tree.column(col, width=final_w, anchor="center")
+
 
 
 
@@ -305,46 +370,92 @@ class JSONViewerApp:
                 messagebox.showerror("Error", f"Failed to process {path}: {str(e)}")
 
     def open_selected_files(self):
-        selected_indices = self.file_listbox.curselection()
-        if not selected_indices:
+        """Open the file that is currently selected in the listbox.
+        Also copies any filter values from the main window into the
+        result‑window’s filter panel and applies them."""
+        # ------------------------------------------------------------------
+        # 1️⃣ Get the selected relative path from the listbox
+        # ------------------------------------------------------------------
+        sel = self.file_listbox.curselection()
+        if not sel:
             return
 
+        rel_path = self.file_listbox.get(sel[0])          # e.g. "subdir/file.json"
         current_dir = os.path.dirname(os.path.abspath(__file__))
+        full_path = os.path.join(current_dir, rel_path)
 
-        for idx in selected_indices:
-            filename = self.file_listbox.get(idx)
-            full_path = os.path.join(current_dir, filename)
+        try:
+            # ------------------------------------------------------------------
+            # 2️⃣ Load the JSON and turn it into rows for the table
+            # ------------------------------------------------------------------
+            with open(full_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            records = data.get("records", [])
+            processed = self._process_records_for_display(records, full_path)
 
-            # Load and process the data
-            try:
-                with open(full_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                records = data.get("records", [])
+            # ------------------------------------------------------------------
+            # 3️⃣ Show the data window
+            # ------------------------------------------------------------------
+            self.display_data_window(processed, os.path.basename(rel_path))
 
-                processed_data = []
-                for r in records:
-                    if 'flowRecords' in r and 'flows' in r['flowRecords']:
-                        for flow in r['flowRecords']['flows']:
-                            acl_id = flow.get('aclID', '')
-                            nsg_name = extract_nsg(acl_id)
-                            vnet_name = extract_vnet(r)  # Extract vNet from the record
-                            for group in flow.get('flowGroups', []):
-                                rule_name = group.get('rule', '')
-                                for tuple_str in group.get('flowTuples', []):
-                                    fields = tuple_str.split(',')
-                                    row = self.map_flow_tuple(fields)
-                                    if row:
-                                        # Add vnet, nsg, and rule to the row
-                                        row['vnet'] = vnet_name
-                                        row['nsg'] = nsg_name
-                                        row['rule'] = rule_name
-                                        processed_data.append(row)
+            # ------------------------------------------------------------------
+            # 4️⃣ Inject the main‑window filter values into the new window
+            # ------------------------------------------------------------------
+            # The most recently created Toplevel is our data window
+            data_win = self.root.winfo_children()[-1]
 
-                # Show the processed data
-                self.display_data_window(processed_data, filename)
+            # Walk down to the "Filter rows" labelframe and grab its three Entry widgets
+            for child in data_win.winfo_children():
+                if isinstance(child, ttk.Frame):          # table_frame
+                    for sub in child.winfo_children():
+                        if (isinstance(sub, ttk.LabelFrame) and
+                                sub.cget('text') == "Filter rows"):
+                            entries = [w for w in sub.winfo_children()
+                                       if isinstance(w, ttk.Entry)]
+                            if len(entries) >= 3:
+                                # Fill Source / Destination / Port from the main window
+                                entries[0].delete(0, tk.END)
+                                entries[0].insert(0, self.src_entry.get())
 
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load {filename}: {str(e)}")
+                                entries[1].delete(0, tk.END)
+                                entries[1].insert(0, self.dst_entry.get())
+
+                                entries[2].delete(0, tk.END)
+                                entries[2].insert(0, self.port_entry.get())
+
+                                # Click the "Apply Filter" button programmatically
+                                for w in sub.winfo_children():
+                                    if (isinstance(w, ttk.Button) and
+                                            w.cget('text') == "Apply Filter"):
+                                        w.invoke()
+                                        break
+                            break
+            # ------------------------------------------------------------------
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open {rel_path}:\n{e}")
+
+
+
+    def _process_records_for_display(self, records, full_path):
+        """Convert raw `records` into the list of rows shown in the data window."""
+        processed_data = []
+        for r in records:
+            if 'flowRecords' not in r or 'flows' not in r['flowRecords']:
+                continue
+            vnet_name = extract_vnet(r)
+            for flow in r['flowRecords']['flows']:
+                nsg_name = extract_nsg(flow.get('aclID', ''))
+                for group in flow.get('flowGroups', []):
+                    rule_name = group.get('rule', '')
+                    for tup in group.get('flowTuples', []):
+                        fields = tup.split(',')
+                        row = self.map_flow_tuple(fields)
+                        if row:
+                            row['vnet'] = vnet_name
+                            row['nsg']  = nsg_name
+                            row['rule'] = rule_name
+                            processed_data.append(row)
+        return processed_data
 
 
     def refresh_files(self):
@@ -357,6 +468,84 @@ class JSONViewerApp:
 
         # Update status bar
         self.status_bar.config(text="File list refreshed")
+
+    def _restore_full_file_list(self):
+        """Populate the file‑listbox with every JSON file under the current folder."""
+        self.file_listbox.delete(0, tk.END)
+        self.load_existing_json_files()          # re‑uses your existing loader
+        self.status_bar.config(text="Ready")
+
+    def _clear_main_filters_and_restore(self):
+        """Reset the Search‑in‑Files entries and show every JSON file again."""
+        # 1️Clear the entry fields in the main window
+        self.src_entry.delete(0, tk.END)
+        self.dst_entry.delete(0, tk.END)
+        self.port_entry.delete(0, tk.END)
+
+        # 2️Repopulate the listbox with all files (the existing helper does that)
+        self._restore_full_file_list()
+
+
+
+    def search_in_files(self):
+        """
+        Filter the main file‑listbox to show only JSON files that contain the
+        supplied Source / Destination / Port values.
+        Empty fields are ignored (AND logic on the non‑empty ones).
+        """
+        src  = self.src_entry.get().strip()
+        dst  = self.dst_entry.get().strip()
+        port = self.port_entry.get().strip()
+
+        # If nothing entered, just show everything again
+        if not any([src, dst, port]):
+            self._restore_full_file_list()
+            return
+
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        matching_paths = []
+
+        for root, _, files in os.walk(current_dir):
+            for fname in files:
+                if not fname.lower().endswith('.json'):
+                    continue
+                full_path = os.path.join(root, fname)
+
+                try:
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                except Exception:
+                    continue
+
+                # AND‑logic on the non‑empty criteria
+                if src and src not in content:
+                    continue
+                if dst and dst not in content:
+                    continue
+                if port and port not in content:
+                    continue
+
+                rel_path = os.path.relpath(full_path, current_dir)
+                matching_paths.append(rel_path)
+
+        # -------------------------------------------------
+        # Update the listbox to show only the matches
+        # -------------------------------------------------
+        self.file_listbox.delete(0, tk.END)          # clear current view
+        for p in sorted(matching_paths):
+            self.file_listbox.insert(tk.END, p)
+
+        # Show a short status message with the criteria used
+        crit_parts = []
+        if src:  crit_parts.append(f'Source="{src}"')
+        if dst:  crit_parts.append(f'Destination="{dst}"')
+        if port: crit_parts.append(f'Port="{port}"')
+        crit_text = ", ".join(crit_parts) if crit_parts else "no criteria"
+        self.status_bar.config(
+            text=f"{len(matching_paths)} file(s) matching: {crit_text}"
+        )
+
+
 
 
     def display_data_window(self, data, filename):
@@ -393,21 +582,47 @@ class JSONViewerApp:
         table_frame = ttk.Frame(data_window)
         table_frame.pack(fill="both", expand=True)
 
-        # Add instruction label above the table
-        instruction_label = ttk.Label(table_frame, text="Search supports partial matches and exact matches using quotes (e.g., \"Exact Match\")", 
-                                        font=('Helvetica', 10, 'italic'))
-        instruction_label.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 5))
+        # -------------------------------------------------
+        #   Filter panel inside the data‑window
+        # -------------------------------------------------
+        filter_panel = ttk.LabelFrame(table_frame, text="Filter rows")
+        filter_panel.grid(row=0, column=0, columnspan=2,
+                         sticky='ew', padx=5, pady=(0, 5))
 
-        # Search frame
-        search_frame = ttk.Frame(table_frame)
-        search_frame.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(0, 5))
+        # Source entry
+        ttk.Label(filter_panel, text="Source:").grid(row=0, column=0,
+                                                    sticky='e', padx=2, pady=2)
+        src_var = tk.StringVar()
+        src_entry = ttk.Entry(filter_panel, width=20, textvariable=src_var)
+        src_entry.grid(row=0, column=1, sticky='w', padx=2, pady=2)
 
-        search_label = ttk.Label(search_frame, text="Search:")
-        search_label.pack(side='left', padx=(0, 5))
+        # Destination entry
+        ttk.Label(filter_panel, text="Destination:").grid(row=0, column=2,
+                                                         sticky='e',
+                                                         padx=2, pady=2)
+        dst_var = tk.StringVar()
+        dst_entry = ttk.Entry(filter_panel, width=20, textvariable=dst_var)
+        dst_entry.grid(row=0, column=3, sticky='w', padx=2, pady=2)
 
-        self.search_var = tk.StringVar()
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
-        search_entry.pack(side='left', padx=(0, 5))
+        # Destination Port entry
+        ttk.Label(filter_panel, text="Destination Port:").grid(row=0,
+                                                             column=4,
+                                                             sticky='e',
+                                                             padx=2,
+                                                             pady=2)
+        port_var = tk.StringVar()
+        port_entry = ttk.Entry(filter_panel, width=10, textvariable=port_var)
+        port_entry.grid(row=0, column=5, sticky='w', padx=2, pady=2)
+
+        # Filter button
+        filter_btn = ttk.Button(filter_panel,
+                                text="Apply Filter")
+        filter_btn.grid(row=0, column=6, padx=8, pady=2)
+
+        clear_filter_btn = ttk.Button(filter_panel, text="Clear Filter")
+        clear_filter_btn.grid(row=0, column=7, padx=8, pady=2)
+
+
 
         # Define columns for the Treeview
         columns = [
@@ -424,12 +639,11 @@ class JSONViewerApp:
             tree.column(col, width=100, anchor="center")
 
         # Auto-size columns based on content after initial display
-        def autosize_columns():
-            # Wait a bit for the tree to render
-            data_window.after(100, lambda: self._autosize_tree_columns(tree, columns, data))
+        def autosize_after_fill():
+            self._autosize_tree_columns(tree, columns, original_data)
 
-        # Trigger column autosizing
-        autosize_columns()
+        # Schedule it a moment later so the widget exists and has its rows
+        data_window.after(150, autosize_after_fill)
 
 
         # Add scrollbars
@@ -442,12 +656,12 @@ class JSONViewerApp:
         scrollbar_x.config(command=tree.xview)
 
         # Pack the Treeview and scrollbars in a grid-like layout
-        tree.grid(row=2, column=0, sticky="nsew")
-        scrollbar_y.grid(row=2, column=1, sticky="ns")
-        scrollbar_x.grid(row=3, column=0, sticky="ew")
+        tree.grid(row=3, column=0, sticky="nsew")
+        scrollbar_y.grid(row=3, column=1, sticky="ns")
+        scrollbar_x.grid(row=4, column=0, sticky="ew")
 
         # Configure grid to expand properly
-        table_frame.grid_rowconfigure(2, weight=1)
+        table_frame.grid_rowconfigure(3, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
 
         # Store mapping from item ID to data index
@@ -471,56 +685,49 @@ class JSONViewerApp:
                 # Apply platform rule tag if rule is 'PlatformRule'
                 if row.get('rule', '') == 'PlatformRule':
                     tree.item(item_id, tags='platform_rule')
+        # -------------------------------------------------
+        #   Row‑filter based on Source / Destination / Port
+        # -------------------------------------------------
+        def apply_row_filter(event=None):
+            """Filter `original_data` using the three precise fields (AND logic)."""
+            src_val = src_var.get().strip()
+            dst_val = dst_var.get().strip()
+            port_val = port_var.get().strip()
 
-
-        def filter_data(event=None):
-            search_term = self.search_var.get().strip()
-
-            # Handle empty search
-            if not search_term:
+            # If all are empty just show original data
+            if not any([src_val, dst_val, port_val]):
                 update_treeview_display(original_data)
                 return
 
-            # Parse search terms - split by spaces but preserve quoted strings
-            import re
-            # This regex splits on spaces but keeps quoted strings together
-            pattern = r'"[^"]*"|\S+'
-            terms = re.findall(pattern, search_term)
-
-            # Remove quotes from quoted terms
-            clean_terms = [term.strip('"') for term in terms]
-
-            def matches_row(row):
-                # Get all values from the row
-                row_values = [str(value).lower() for value in row.values()]
-
-                # Check if all terms match (AND logic)
-                for i, term in enumerate(clean_terms):
-                    # If this is an exact match term (quoted)
-                    if terms[i].startswith('"') and terms[i].endswith('"'):
-                        # Exact match - check if any field exactly matches the term
-                        if not any(term.lower() == value for value in row_values):
-                            return False
-                    else:
-                        # Partial match - check if any field contains the term
-                        if not any(term.lower() in value for value in row_values):
-                            return False
-
+            def row_matches(row):
+                # All comparisons are case‑insensitive string contains
+                if src_val and src_val.lower() not in str(row.get('sourceIP', '')).lower():
+                    return False
+                if dst_val and dst_val.lower() not in str(row.get('destIP', '')).lower():
+                    return False
+                if port_val and port_val.lower() not in str(row.get('destPort', '')).lower():
+                    return False
                 return True
 
-            # Filter data using the new matching logic
-            filtered_rows = [row for row in original_data if matches_row(row)]
-            update_treeview_display(filtered_rows)
+            filtered = [r for r in original_data if row_matches(r)]
+            update_treeview_display(filtered)
+        
+        def clear_filters():
+            """Reset entry widgets, show all rows again."""
+            src_var.set("")
+            dst_var.set("")
+            port_var.set("")
+            update_treeview_display(original_data)
+
+        # Bind the button to the helper
+        clear_filter_btn.configure(command=clear_filters)
 
 
-        search_entry.bind('<KeyRelease>', filter_data)
-
-        search_btn = ttk.Button(search_frame, text="Search", command=filter_data)
-        search_btn.pack(side='left', padx=(0, 5))
-
-        clear_search_btn = ttk.Button(search_frame, text="Clear Search", command=lambda: 
-            [self.search_var.set(""), filter_data()])
-        clear_search_btn.pack(side='left')
+        # Bind button click and <Return> on any of the three entries
+        filter_btn.configure(command=apply_row_filter)
+        src_entry.bind('<Return>', apply_row_filter)
+        dst_entry.bind('<Return>', apply_row_filter)
+        port_entry.bind('<Return>', apply_row_filter)
 
         # Initial display
         update_treeview_display(original_data)
