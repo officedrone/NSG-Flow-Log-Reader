@@ -16,7 +16,8 @@ A GUI application for parsing and visualizing Azure Network Security Group (NSG)
 4. Use copy buttons to export data for analysis
 
 
-<img width="1549" height="1052" alt="image" src="https://github.com/user-attachments/assets/e84bc454-dd6c-4329-9618-d42ef26faaf0" />
+<img width="1549" height="1052" alt="image" src="https://github.com/user-attachments/assets/53b03388-3e76-439e-8954-2978ce933906" />
+
 
 
 
