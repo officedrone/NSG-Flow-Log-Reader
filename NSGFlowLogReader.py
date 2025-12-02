@@ -490,7 +490,8 @@ class JSONViewerApp:
     def search_in_files(self):
         """
         Filter the main file‑listbox to show only JSON files that contain the
-        supplied Source / Destination / Port values.
+        supplied Source / Destination / Port values – only showing the
+        *parsed* columns (sourceIP, destIP, destPort) matches are shown.
         Empty fields are ignored (AND logic on the non‑empty ones).
         """
         src  = self.src_entry.get().strip()
@@ -512,21 +513,31 @@ class JSONViewerApp:
                 full_path = os.path.join(root, fname)
 
                 try:
+                    # ---- 1️⃣ Load and parse the file exactly as we do when opening it ----
                     with open(full_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
+                        data = json.load(f)
+                    records = data.get("records", [])
+                    rows = self._process_records_for_display(records, full_path)
+
+                    # ---- 2️⃣ Check the three columns (AND logic) -------------------------
+                    match = True
+                    if src and not any(src.lower() in str(r.get('sourceIP', '')).lower()
+                                       for r in rows):
+                        match = False
+                    if dst and not any(dst.lower() in str(r.get('destIP', '')).lower()
+                                       for r in rows):
+                        match = False
+                    if port and not any(port.lower() in str(r.get('destPort', '')).lower()
+                                        for r in rows):
+                        match = False
+
+                    if match:
+                        rel_path = os.path.relpath(full_path, current_dir)
+                        matching_paths.append(rel_path)
+
                 except Exception:
+                    # If a file cannot be read/parsed we simply ignore it
                     continue
-
-                # AND‑logic on the non‑empty criteria
-                if src and src not in content:
-                    continue
-                if dst and dst not in content:
-                    continue
-                if port and port not in content:
-                    continue
-
-                rel_path = os.path.relpath(full_path, current_dir)
-                matching_paths.append(rel_path)
 
         # -------------------------------------------------
         # Update the listbox to show only the matches
