@@ -3,7 +3,8 @@ import datetime
 from tkinter import ttk, filedialog, messagebox
 import os
 import json
-
+import threading
+import queue
 
 
 # ----------------------------------------------------------------------
@@ -126,6 +127,7 @@ class JSONViewerApp:
         self.root = root
         self.root.title("NSG Flow Log JSON Viewer")
         self.loaded_files = {}  # Maps full path to parsed data (list of records)
+        self._search_progress_q = queue.Queue()
 
         # Set modern theme
         style = ttk.Style()
@@ -277,7 +279,7 @@ class JSONViewerApp:
 
 
         # -----------------------------------------------------------------
-        # Control buttons (Open Selected / Refresh / Open Other) – unchanged
+        # Control buttons (Open Selected / Refresh / Open Other)
         # -----------------------------------------------------------------
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(pady=5, fill='x')
@@ -299,7 +301,7 @@ class JSONViewerApp:
         self.open_btn.pack(side='left', padx=5)
 
         # -----------------------------------------------------------------
-        # Load files, auto‑size window, status bar – unchanged
+        # Load files, auto‑size window, status bar
         # -----------------------------------------------------------------
         self.load_existing_json_files()
         self.auto_size_window()
@@ -309,22 +311,6 @@ class JSONViewerApp:
                                     relief=tk.SUNKEN,
                                     anchor='w')
         self.status_bar.pack(side='bottom', fill='x')
-
-
-
-    def _clear_history(self):
-        """Erase the persisted history and update all comboboxes."""
-        if messagebox.askyesno("Confirm", "Delete all saved filter history?"):
-            self.filter_history = {"src": [], "dst": [], "port": []}
-            _save_history(self.filter_history)
-
-            # refresh any open comboboxes (main window + possibly opened data windows)
-            for cb, key in [(self.src_cb, "src"),
-                            (self.dst_cb, "dst"),
-                            (self.port_cb, "port")]:
-                cb['values'] = []          # clear dropdown
-                cb.set("")                 # clear current text
-
 
     def on_file_double_click(self, event):
         """Handle double-click on a file in the listbox"""
@@ -591,6 +577,7 @@ class JSONViewerApp:
 
 
     def search_in_files(self):
+        """Entry point called by the “Search in Files” button."""
         src  = self.src_var.get().strip()
         dst  = self.dst_var.get().strip()
         port = self.port_var.get().strip()
@@ -600,62 +587,167 @@ class JSONViewerApp:
         self._push_to_history("dst",  dst)
         self._push_to_history("port", port)
 
-        # If nothing entered, show everything
-        if not any([src, dst, port]):
+        if not any([src, dst, port]):          # nothing entered → show everything
             self._restore_full_file_list()
             return
 
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        matching_paths = []
+        # ------------------------------------------------------------------
+        # Start the background thread
+        # ------------------------------------------------------------------
+        threading.Thread(
+            target=self._search_worker,
+            args=(src, dst, port),
+            daemon=True               # dies automatically when app closes
+        ).start()
 
+        # ------------------------------------------------------------------
+        # Begin polling the progress queue so we can update the status bar.
+        # This runs on the main (Tk) thread – safe to touch widgets.
+        # ------------------------------------------------------------------
+        self._poll_search_progress()
+
+    def _search_worker(self, src: str, dst: str, port: str):
+        """
+        Runs in a background thread, walks the directory tree,
+        parses JSON files and puts progress messages into self._search_progress_q.
+        When finished it puts a sentinel tuple ('DONE', matching_paths).
+        """
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # ---- collect all json files first so we can compute % ----------
+        all_json_files = []
         for root, _, files in os.walk(current_dir):
             for fname in files:
-                if not fname.lower().endswith('.json'):
-                    continue
-                full_path = os.path.join(root, fname)
+                if fname.lower().endswith('.json'):
+                    full_path = os.path.join(root, fname)
+                    rel_path  = os.path.relpath(full_path, current_dir)
+                    all_json_files.append((full_path, rel_path))
 
-                try:
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    rows = self._process_records_for_display(data.get('records', []),
-                                                             full_path)
+        total_files = len(all_json_files)
+        processed   = 0
+        matching_paths = []
 
-                    # ---- NEW logic ----------------------------------------------------
-                    # Keep the file **only if at least one row satisfies *every* supplied filter**
-                    def row_satisfies(row):
-                        if src and src.lower() not in str(row.get('sourceIP', '')).lower():
-                            return False
-                        if dst and dst.lower() not in str(row.get('destIP', '')).lower():
-                            return False
-                        if port and port.lower() not in str(row.get('destPort', '')).lower():
-                            return False
-                        return True
+        # ---- walk the list and report progress -------------------------
+        for full_path, rel_path in all_json_files:
+            # report which file we are looking at *and* how many have been done
+            self._search_progress_q.put(
+                ('FILE', rel_path, processed, total_files))
 
-                    if any(row_satisfies(r) for r in rows):
-                        rel_path = os.path.relpath(full_path, current_dir)
-                        matching_paths.append(rel_path)
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                rows = self._process_records_for_display(
+                    data.get('records', []), full_path)
 
-                except Exception:
-                    # ignore files that cannot be read/parsed
-                    continue
+                # row‑match logic (same as before)
+                def row_satisfies(row):
+                    if src and src.lower() not in str(row.get('sourceIP', '')).lower():
+                        return False
+                    if dst and dst.lower() not in str(row.get('destIP', '')).lower():
+                        return False
+                    if port and port.lower() not in str(row.get('destPort', '')).lower():
+                        return False
+                    return True
 
-        # -------------------------------------------------
-        # Update the listbox with only the matching files
-        # -------------------------------------------------
-        self.file_listbox.delete(0, tk.END)
-        for p in sorted(matching_paths):
-            self.file_listbox.insert(tk.END, p)
+                if any(row_satisfies(r) for r in rows):
+                    matching_paths.append(rel_path)
 
-        # status message (optional)
-        crit = []
-        if src:  crit.append(f'Source="{src}"')
-        if dst:  crit.append(f'Destination="{dst}"')
-        if port: crit.append(f'Port="{port}"')
-        self.status_bar.config(
-            text=f"{len(matching_paths)} file(s) matching: {', '.join(crit) or 'no criteria'}")
+            except Exception:
+                # ignore unreadable files – still report progress
+                pass
 
+            processed += 1                     # one more file finished
+
+        # ---- tell the UI we are finished ------------------------------------
+        self._search_progress_q.put(('DONE', matching_paths))
 
 
+    def _poll_search_progress(self):
+        """
+        Called repeatedly from the Tk event loop.
+        Pops items off self._search_progress_q and updates the UI.
+        When a ('DONE', …) message arrives it finalises the listbox.
+        """
+        try:
+            while True:               # drain everything currently queued
+                msg = self._search_progress_q.get_nowait()
+
+                if msg[0] == 'FILE':
+                    _, rel_path, processed, total = msg
+                    percent = int((processed / total) * 100) if total else 0
+                    # show both file name and percentage in the status bar
+                    self.status_bar.config(
+                        text=f"Scanning {rel_path} … ({percent}% )")
+
+                    # optional visual bar – only runs if you added the widget above
+
+                elif msg[0] == 'DONE':
+                    matching_paths = msg[1]
+
+                    # clear listbox & fill with results
+                    self.file_listbox.delete(0, tk.END)
+                    for p in sorted(matching_paths):
+                        self.file_listbox.insert(tk.END, p)
+
+                    # final status line (reset progress bar to 100 %)
+                    crit = []
+                    if self.src_var.get():  crit.append(f'Source="{self.src_var.get()}"')
+                    if self.dst_var.get():  crit.append(f'Destination="{self.dst_var.get()}"')
+                    if self.port_var.get(): crit.append(f'Port="{self.port_var.get()}"')
+                    self.status_bar.config(
+                        text=f"{len(matching_paths)} file(s) matching: {', '.join(crit) or 'no criteria'}")
+
+        except queue.Empty:
+            # nothing left right now – just wait for the next poll
+            pass
+
+        # schedule the next poll (≈ every 100 ms)
+        self.root.after(100, self._poll_search_progress)
+
+
+
+    def _poll_search_progress(self):
+        """
+        Called repeatedly from the Tk event loop.
+        Pops items off self._search_progress_q and updates the UI.
+        When a ('DONE', …) message arrives it finalises the listbox.
+        """
+        try:
+            while True:               # drain everything currently queued
+                msg = self._search_progress_q.get_nowait()
+
+                if msg[0] == 'FILE':
+                    # msg layout: ('FILE', rel_path, processed, total_files)
+                    _, rel_path, processed, total = msg
+
+                    # `processed` is the number of files that have already been *finished*.
+                    # The file we are currently looking at is therefore:
+                    current_index = processed + 1          # 1‑based count
+                    percent = int((current_index / total) * 100) if total else 0
+
+                    self.status_bar.config(
+                        text=f"Scanning {rel_path} (file {current_index} of {total}) {percent}%")
+
+                elif msg[0] == 'DONE':
+                    # … existing DONE handling …
+                    matching_paths = msg[1]
+                    self.file_listbox.delete(0, tk.END)
+                    for p in sorted(matching_paths):
+                        self.file_listbox.insert(tk.END, p)
+
+                    crit = []
+                    if self.src_var.get():  crit.append(f'Source="{self.src_var.get()}"')
+                    if self.dst_var.get():  crit.append(f'Destination="{self.dst_var.get()}"')
+                    if self.port_var.get(): crit.append(f'Port="{self.port_var.get()}"')
+                    self.status_bar.config(
+                        text=f"{len(matching_paths)} file(s) matching: {', '.join(crit) or 'no criteria'}")
+
+        except queue.Empty:
+            # nothing left right now – just wait for the next poll
+            pass
+
+        # schedule the next poll (≈ every 100 ms)
+        self.root.after(100, self._poll_search_progress)
 
 
     def display_data_window(self, data, filename):
