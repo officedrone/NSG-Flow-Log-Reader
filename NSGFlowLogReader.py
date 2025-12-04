@@ -4,6 +4,47 @@ from tkinter import ttk, filedialog, messagebox
 import os
 import json
 
+
+
+# ----------------------------------------------------------------------
+# Filter‑history persistence
+# ----------------------------------------------------------------------
+HISTORY_FILE = "filterhistory.txt"
+MAX_HISTORY = 20                     # keep at most 20 items per field
+
+def _load_history() -> dict:
+    """
+    Reads HISTORY_FILE and returns a dict:
+
+        {
+            "src":  [<last used source values>],
+            "dst":  [<last used destination values>],
+            "port": [<last used port values>]
+        }
+
+    If the file does not exist or is malformed an empty dict is returned.
+    """
+    if not os.path.isfile(HISTORY_FILE):
+        return {}
+
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)          # store JSON → easier than custom format
+            # make sure we have lists
+            for k in ("src", "dst", "port"):
+                if not isinstance(data.get(k), list):
+                    data[k] = []
+            return data
+    except Exception:
+        return {}
+
+
+def _save_history(history: dict) -> None:
+    """Writes the supplied dict to HISTORY_FILE (pretty‑printed JSON)."""
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, indent=2, sort_keys=True)
+
+
 # Global mapping arrays for field names
 arrFlowMap = [
     "UnixEpoch", "vnet", "nsg", "rule",
@@ -90,7 +131,56 @@ class JSONViewerApp:
         style = ttk.Style()
         style.theme_use('clam')  # 'clam' is a cleaner default theme
 
+        # Load any previously saved filter history
+        self.filter_history = _load_history()          # {'src': [], 'dst': [], 'port': []}
+
         self.create_widgets()
+    
+    def _push_to_history(self, key: str, value: str) -> None:
+        """Add a non‑empty value to the in‑memory history and persist it."""
+        if not value:
+            return
+        lst = self.filter_history.setdefault(key, [])
+        # Move existing entry to front or prepend new one
+        if value in lst:
+            lst.remove(value)
+        lst.insert(0, value)
+        # Trim excess items
+        self.filter_history[key] = lst[:MAX_HISTORY]
+        _save_history(self.filter_history)
+
+    def _make_history_combobox(self, parent, key: str, width: int):
+        """
+        Returns (combobox, tk.StringVar). The combobox shows the saved history for `key`
+        and also allows free‑form typing.
+        """
+        var = tk.StringVar()
+        cb = ttk.Combobox(parent,
+                        textvariable=var,
+                        width=width,
+                        postcommand=lambda: self._refresh_cb_values(cb, key))
+        # allow typing new values
+        cb['state'] = 'normal'   # not 'readonly'
+        return cb, var
+    
+    def _clear_history(self):
+        """Erase the persisted history and update all comboboxes."""
+        if messagebox.askyesno("Confirm", "Delete all saved filter history?"):
+            self.filter_history = {"src": [], "dst": [], "port": []}
+            _save_history(self.filter_history)
+
+            # refresh any open comboboxes (main window + possibly opened data windows)
+            for cb, key in [(self.src_cb, "src"),
+                            (self.dst_cb, "dst"),
+                            (self.port_cb, "port")]:
+                cb['values'] = []          # clear dropdown
+                cb.set("")                 # clear current text
+
+
+    def _refresh_cb_values(self, combobox: ttk.Combobox, key: str):
+        """Populate the drop‑down list with the current history for `key`."""
+        combobox['values'] = self.filter_history.get(key, [])
+
 
     def create_widgets(self):
         main_frame = ttk.Frame(self.root, padding=10)
@@ -136,27 +226,32 @@ class JSONViewerApp:
         search_section = ttk.Frame(search_outer)
         search_section.pack(fill='x', padx=5, pady=(8, 8))
 
-        # Source entry
+        # Source combobox
         ttk.Label(search_section, text="Source:").grid(row=0, column=0,
                                                      sticky='e', padx=2, pady=2)
-        self.src_entry = ttk.Entry(search_section, width=20)
-        self.src_entry.grid(row=0, column=1, sticky='w', padx=2, pady=2)
+        self.src_cb, self.src_var = self._make_history_combobox(
+            search_section, "src", 20)
+        self.src_cb.grid(row=0, column=1, sticky='w', padx=2, pady=2)
 
-        # Destination entry
+        # Destination combobox
         ttk.Label(search_section, text="Destination:").grid(row=0,
                                                           column=2,
                                                           sticky='e',
                                                           padx=2, pady=2)
-        self.dst_entry = ttk.Entry(search_section, width=20)
-        self.dst_entry.grid(row=0, column=3, sticky='w', padx=2, pady=2)
+        self.dst_cb, self.dst_var = self._make_history_combobox(
+            search_section, "dst", 20)
+        self.dst_cb.grid(row=0, column=3, sticky='w', padx=2, pady=2)
 
-        # Destination Port entry
+        # Destination Port combobox
         ttk.Label(search_section,
                   text="Destination Port:").grid(row=0, column=4,
                                                 sticky='e',
                                                 padx=2, pady=2)
-        self.port_entry = ttk.Entry(search_section, width=10)
-        self.port_entry.grid(row=0, column=5, sticky='w', padx=2, pady=2)
+        self.port_cb, self.port_var = self._make_history_combobox(
+            search_section, "port", 10)
+        self.port_cb.grid(row=0, column=5, sticky='w', padx=2, pady=2)
+
+
 
         # Search button
         self.search_files_btn = ttk.Button(
@@ -171,6 +266,15 @@ class JSONViewerApp:
             text="Clear Filter",
             command=self._clear_main_filters_and_restore)
         self.clear_filter_btn.grid(row=0, column=7, padx=8, pady=2)
+
+        # Clear History button (adds a small gap)
+        self.clear_hist_btn = ttk.Button(
+            search_section,
+            text="Clear History",
+            command=self._clear_history)
+        self.clear_hist_btn.grid(row=0, column=8, padx=8, pady=2)
+
+
 
         # -----------------------------------------------------------------
         # Control buttons (Open Selected / Refresh / Open Other) – unchanged
@@ -207,6 +311,19 @@ class JSONViewerApp:
         self.status_bar.pack(side='bottom', fill='x')
 
 
+
+    def _clear_history(self):
+        """Erase the persisted history and update all comboboxes."""
+        if messagebox.askyesno("Confirm", "Delete all saved filter history?"):
+            self.filter_history = {"src": [], "dst": [], "port": []}
+            _save_history(self.filter_history)
+
+            # refresh any open comboboxes (main window + possibly opened data windows)
+            for cb, key in [(self.src_cb, "src"),
+                            (self.dst_cb, "dst"),
+                            (self.port_cb, "port")]:
+                cb['values'] = []          # clear dropdown
+                cb.set("")                 # clear current text
 
 
     def on_file_double_click(self, event):
@@ -288,12 +405,6 @@ class JSONViewerApp:
             final_w = max(min_width, min(best + buffer_px, max_width))
             tree.column(col, width=final_w, anchor="center")
 
-
-
-
-
-
-
     # Function to map flow tuple fields to their proper names and values
     def map_flow_tuple(self, fields):
         if len(fields) != 13:
@@ -351,7 +462,6 @@ class JSONViewerApp:
             title="Select JSON Files",
             filetypes=[("JSON Files", "*.json")]
         )
-
         if not file_paths:
             return
 
@@ -360,7 +470,6 @@ class JSONViewerApp:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
 
-                # Extract "records" array
                 records = data.get("records", [])
                 self.loaded_files[path] = records
                 filename = os.path.basename(path)
@@ -369,13 +478,14 @@ class JSONViewerApp:
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to process {path}: {str(e)}")
 
+    # -------------------------------------------------
+    #   Open the file that is currently selected in the listbox
+    # -------------------------------------------------
     def open_selected_files(self):
         """Open the file that is currently selected in the listbox.
         Also copies any filter values from the main window into the
         result‑window’s filter panel and applies them."""
-        # ------------------------------------------------------------------
-        # 1️⃣ Get the selected relative path from the listbox
-        # ------------------------------------------------------------------
+        #  Get the selected relative path from the listbox
         sel = self.file_listbox.curselection()
         if not sel:
             return
@@ -385,54 +495,41 @@ class JSONViewerApp:
         full_path = os.path.join(current_dir, rel_path)
 
         try:
-            # ------------------------------------------------------------------
-            # 2️⃣ Load the JSON and turn it into rows for the table
-            # ------------------------------------------------------------------
+            # Load the JSON and turn it into rows for the table
             with open(full_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             records = data.get("records", [])
             processed = self._process_records_for_display(records, full_path)
 
-            # ------------------------------------------------------------------
-            # 3️⃣ Show the data window
-            # ------------------------------------------------------------------
+            # Show the data window
             self.display_data_window(processed, os.path.basename(rel_path))
 
-            # ------------------------------------------------------------------
-            # 4️⃣ Inject the main‑window filter values into the new window
-            # ------------------------------------------------------------------
-            # The most recently created Toplevel is our data window
-            data_win = self.root.winfo_children()[-1]
+            # Inject the main‑window filter values into the new window
+            data_win = self.root.winfo_children()[-1]   # newest Toplevel
 
-            # Walk down to the "Filter rows" labelframe and grab its three Entry widgets
             for child in data_win.winfo_children():
                 if isinstance(child, ttk.Frame):          # table_frame
                     for sub in child.winfo_children():
                         if (isinstance(sub, ttk.LabelFrame) and
                                 sub.cget('text') == "Filter rows"):
-                            entries = [w for w in sub.winfo_children()
-                                       if isinstance(w, ttk.Entry)]
-                            if len(entries) >= 3:
-                                # Fill Source / Destination / Port from the main window
-                                entries[0].delete(0, tk.END)
-                                entries[0].insert(0, self.src_entry.get())
+                            combos = [w for w in sub.winfo_children()
+                                      if isinstance(w, ttk.Combobox)]
+                            if len(combos) >= 3:
+                                combos[0].set(self.src_var.get())
+                                combos[1].set(self.dst_var.get())
+                                combos[2].set(self.port_var.get())
 
-                                entries[1].delete(0, tk.END)
-                                entries[1].insert(0, self.dst_entry.get())
-
-                                entries[2].delete(0, tk.END)
-                                entries[2].insert(0, self.port_entry.get())
-
-                                # Click the "Apply Filter" button programmatically
+                                # click “Apply Filter”
                                 for w in sub.winfo_children():
                                     if (isinstance(w, ttk.Button) and
                                             w.cget('text') == "Apply Filter"):
                                         w.invoke()
                                         break
                             break
-            # ------------------------------------------------------------------
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open {rel_path}:\n{e}")
+
+
 
 
 
@@ -476,27 +573,38 @@ class JSONViewerApp:
         self.status_bar.config(text="Ready")
 
     def _clear_main_filters_and_restore(self):
-        """Reset the Search‑in‑Files entries and show every JSON file again."""
-        # 1️Clear the entry fields in the main window
-        self.src_entry.delete(0, tk.END)
-        self.dst_entry.delete(0, tk.END)
-        self.port_entry.delete(0, tk.END)
+        """Reset the Search‑in‑Files fields and show every JSON file again."""
+        # Clear the comboboxes in the main window
+        self.src_cb.set("")
+        self.dst_cb.set("")
+        self.port_cb.set("")
 
-        # 2️Repopulate the listbox with all files (the existing helper does that)
+        # also clear the associated StringVars (optional, but keeps them in sync)
+        self.src_var.set("")
+        self.dst_var.set("")
+        self.port_var.set("")
+
+        # Repopulate the listbox with all files
         self._restore_full_file_list()
+
 
 
 
     def search_in_files(self):
         """
         Filter the main file‑listbox to show only JSON files that contain the
-        supplied Source / Destination / Port values – only showing the
-        *parsed* columns (sourceIP, destIP, destPort) matches are shown.
+        supplied Source / Destination / Port values – but now we look at the
+        *parsed* columns (sourceIP, destIP, destPort) instead of raw text.
         Empty fields are ignored (AND logic on the non‑empty ones).
         """
-        src  = self.src_entry.get().strip()
-        dst  = self.dst_entry.get().strip()
-        port = self.port_entry.get().strip()
+        src  = self.src_var.get().strip()
+        dst  = self.dst_var.get().strip()
+        port = self.port_var.get().strip()
+
+        # remember what the user typed (store in history)
+        self._push_to_history("src",  src)
+        self._push_to_history("dst",  dst)
+        self._push_to_history("port", port)
 
         # If nothing entered, just show everything again
         if not any([src, dst, port]):
@@ -600,30 +708,31 @@ class JSONViewerApp:
         filter_panel.grid(row=0, column=0, columnspan=2,
                          sticky='ew', padx=5, pady=(0, 5))
 
-        # Source entry
+        # Source combobox in data window
+        self.src_cb_dw, self.src_var_dw = self._make_history_combobox(
+            filter_panel, "src", 20)
         ttk.Label(filter_panel, text="Source:").grid(row=0, column=0,
                                                     sticky='e', padx=2, pady=2)
-        src_var = tk.StringVar()
-        src_entry = ttk.Entry(filter_panel, width=20, textvariable=src_var)
-        src_entry.grid(row=0, column=1, sticky='w', padx=2, pady=2)
+        self.src_cb_dw.grid(row=0, column=1, sticky='w', padx=2, pady=2)
 
-        # Destination entry
-        ttk.Label(filter_panel, text="Destination:").grid(row=0, column=2,
+        # Destination combobox in data window
+        self.dst_cb_dw, self.dst_var_dw = self._make_history_combobox(
+            filter_panel, "dst", 20)
+        ttk.Label(filter_panel, text="Destination:").grid(row=0,
+                                                         column=2,
                                                          sticky='e',
                                                          padx=2, pady=2)
-        dst_var = tk.StringVar()
-        dst_entry = ttk.Entry(filter_panel, width=20, textvariable=dst_var)
-        dst_entry.grid(row=0, column=3, sticky='w', padx=2, pady=2)
+        self.dst_cb_dw.grid(row=0, column=3, sticky='w', padx=2, pady=2)
 
-        # Destination Port entry
-        ttk.Label(filter_panel, text="Destination Port:").grid(row=0,
-                                                             column=4,
-                                                             sticky='e',
-                                                             padx=2,
-                                                             pady=2)
-        port_var = tk.StringVar()
-        port_entry = ttk.Entry(filter_panel, width=10, textvariable=port_var)
-        port_entry.grid(row=0, column=5, sticky='w', padx=2, pady=2)
+        # Destination Port combobox in data window
+        self.port_cb_dw, self.port_var_dw = self._make_history_combobox(
+            filter_panel, "port", 10)
+        ttk.Label(filter_panel,
+                  text="Destination Port:").grid(row=0, column=4,
+                                                sticky='e',
+                                                padx=2, pady=2)
+        self.port_cb_dw.grid(row=0, column=5, sticky='w', padx=2, pady=2)
+
 
         # Filter button
         filter_btn = ttk.Button(filter_panel,
@@ -632,6 +741,14 @@ class JSONViewerApp:
 
         clear_filter_btn = ttk.Button(filter_panel, text="Clear Filter")
         clear_filter_btn.grid(row=0, column=7, padx=8, pady=2)
+
+        # Clear History button (adds a small gap)
+        self.clear_hist_btn = ttk.Button(
+            filter_panel, 
+            text="Clear History",
+            command=self._clear_history)
+        self.clear_hist_btn.grid(row=0, column=8, padx=8, pady=2)
+
 
 
 
@@ -701,9 +818,9 @@ class JSONViewerApp:
         # -------------------------------------------------
         def apply_row_filter(event=None):
             """Filter `original_data` using the three precise fields (AND logic)."""
-            src_val = src_var.get().strip()
-            dst_val = dst_var.get().strip()
-            port_val = port_var.get().strip()
+            src_val = self.src_var_dw.get().strip()
+            dst_val = self.dst_var_dw.get().strip()
+            port_val = self.port_var_dw.get().strip()
 
             # If all are empty just show original data
             if not any([src_val, dst_val, port_val]):
@@ -722,23 +839,28 @@ class JSONViewerApp:
 
             filtered = [r for r in original_data if row_matches(r)]
             update_treeview_display(filtered)
-        
+
         def clear_filters():
             """Reset entry widgets, show all rows again."""
-            src_var.set("")
-            dst_var.set("")
-            port_var.set("")
+            self.src_cb_dw.set("")
+            self.dst_cb_dw.set("")
+            self.port_cb_dw.set("")
             update_treeview_display(original_data)
+
 
         # Bind the button to the helper
         clear_filter_btn.configure(command=clear_filters)
 
 
         # Bind button click and <Return> on any of the three entries
+        # Bind button click and <Return> on any of the three comboboxes
         filter_btn.configure(command=apply_row_filter)
-        src_entry.bind('<Return>', apply_row_filter)
-        dst_entry.bind('<Return>', apply_row_filter)
-        port_entry.bind('<Return>', apply_row_filter)
+
+        # The filter fields in the data window are Combobox widgets:
+        self.src_cb_dw.bind('<Return>', apply_row_filter)
+        self.dst_cb_dw.bind('<Return>', apply_row_filter)
+        self.port_cb_dw.bind('<Return>', apply_row_filter)
+
 
         # Initial display
         update_treeview_display(original_data)
@@ -755,40 +877,73 @@ class JSONViewerApp:
 
 
 
+        # -----------------------------------------------------------------
+        # Keep a reference to the rows that are shown in the Treeview.
+        # It will be updated by `update_treeview_display`.
+        # -----------------------------------------------------------------
+        self._shown_rows = original_data[:]   # start with the full set
+
+
+        def update_treeview_display(data_to_display):
+            """Refresh the tree and remember which rows are visible."""
+            # clear existing items
+            for item in tree.get_children():
+                tree.delete(item)
+
+            # fill with the new data
+            for idx, row in enumerate(data_to_display):
+                values = [str(row[col]) for col in columns]
+                item_id = tree.insert("", "end", values=values)
+                self.tree_item_to_data_index[item_id] = idx
+
+                # tags …
+                if row.get('flowState', '') == 'D (Deny)':
+                    tree.item(item_id, tags='deny')
+                if row.get('rule', '') == 'PlatformRule':
+                    tree.item(item_id, tags='platform_rule')
+
+            # remember the rows that are currently shown
+            self._shown_rows = list(data_to_display)
+
+
+        # -----------------------------------------------------------------
+        # Copy functions – now use `self._shown_rows` (filtered view)
+        # -----------------------------------------------------------------
         def copy_to_clipboard():
-            if not data:
+            """Copy CSV of whatever rows are presently displayed."""
+            if not self._shown_rows:
                 return
 
             csv_data = ','.join(columns) + '\n'
-            for row in data:
+            for row in self._shown_rows:          # <-- filtered / shown rows
                 values = [str(row[col]) for col in columns]
                 csv_data += ','.join(values) + '\n'
 
             self.root.clipboard_clear()
             self.root.clipboard_append(csv_data)
 
-        def copy_to_excel(data):
-            if not data:
+
+        def copy_to_excel():
+            """Copy tab‑separated data of the currently displayed rows."""
+            if not self._shown_rows:
                 return
 
-            # Use the correct columns for Excel
-            columns = [
-                "Timestamp", "vnet", "nsg", "rule", "sourceIP", "destIP", "sourcePort",
-                "destPort", "proto", "trafficFlow", "flowState",
-                "encryption", "packetsSrcToDest",
-                "bytesSrcToDest", "packetsDstToSrc", "bytesDestToSrc"
+            excel_cols = [
+                "Timestamp", "vnet", "nsg", "rule", "sourceIP", "destIP",
+                "sourcePort", "destPort", "proto", "trafficFlow", "flowState",
+                "encryption", "packetsSrcToDest", "bytesSrcToDest",
+                "packetsDstToSrc", "bytesDestToSrc"
             ]
 
-            # Create tab-separated data
-            tsv_data = '\t'.join(columns) + '\n'  # Use tab instead of comma
+            tsv_data = '\t'.join(excel_cols) + '\n'
+            for row in self._shown_rows:          # filtered / shown rows
+                values = [str(row[col]) for col in excel_cols]
+                tsv_data += '\t'.join(values) + '\n'
 
-            for row in data:
-                values = [str(row[col]) for col in columns]
-                tsv_data += '\t'.join(values) + '\n'  # Use tab instead of comma
-
-            # Copy directly to clipboard
             self.root.clipboard_clear()
             self.root.clipboard_append(tsv_data)
+
+
 
         # Create a frame for buttons
         button_frame = ttk.Frame(data_window)
@@ -797,7 +952,7 @@ class JSONViewerApp:
         copy_btn1 = ttk.Button(button_frame, text="Copy(CSV)", command=copy_to_clipboard)
         copy_btn1.pack(side='left', padx=5)
 
-        copy_btn2 = ttk.Button(button_frame, text="Copy(Excel)", command=lambda: copy_to_excel(data))
+        copy_btn2 = ttk.Button(button_frame, text="Copy(Excel)", command=copy_to_excel)
         copy_btn2.pack(side='left', padx=5)
 
         close_btn = ttk.Button(button_frame, text="Close", command=data_window.destroy)
@@ -805,9 +960,6 @@ class JSONViewerApp:
 
         # Force window to update and calculate proper size
         data_window.update_idletasks()
-
-
-
 
 if __name__ == "__main__":
     root = tk.Tk()
