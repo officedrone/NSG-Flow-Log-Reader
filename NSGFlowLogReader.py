@@ -591,22 +591,16 @@ class JSONViewerApp:
 
 
     def search_in_files(self):
-        """
-        Filter the main file‑listbox to show only JSON files that contain the
-        supplied Source / Destination / Port values – but now we look at the
-        *parsed* columns (sourceIP, destIP, destPort) instead of raw text.
-        Empty fields are ignored (AND logic on the non‑empty ones).
-        """
         src  = self.src_var.get().strip()
         dst  = self.dst_var.get().strip()
         port = self.port_var.get().strip()
 
-        # remember what the user typed (store in history)
+        # store history …
         self._push_to_history("src",  src)
         self._push_to_history("dst",  dst)
         self._push_to_history("port", port)
 
-        # If nothing entered, just show everything again
+        # If nothing entered, show everything
         if not any([src, dst, port]):
             self._restore_full_file_list()
             return
@@ -621,48 +615,45 @@ class JSONViewerApp:
                 full_path = os.path.join(root, fname)
 
                 try:
-                    # ---- 1️⃣ Load and parse the file exactly as we do when opening it ----
                     with open(full_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    records = data.get("records", [])
-                    rows = self._process_records_for_display(records, full_path)
+                    rows = self._process_records_for_display(data.get('records', []),
+                                                             full_path)
 
-                    # ---- 2️⃣ Check the three columns (AND logic) -------------------------
-                    match = True
-                    if src and not any(src.lower() in str(r.get('sourceIP', '')).lower()
-                                       for r in rows):
-                        match = False
-                    if dst and not any(dst.lower() in str(r.get('destIP', '')).lower()
-                                       for r in rows):
-                        match = False
-                    if port and not any(port.lower() in str(r.get('destPort', '')).lower()
-                                        for r in rows):
-                        match = False
+                    # ---- NEW logic ----------------------------------------------------
+                    # Keep the file **only if at least one row satisfies *every* supplied filter**
+                    def row_satisfies(row):
+                        if src and src.lower() not in str(row.get('sourceIP', '')).lower():
+                            return False
+                        if dst and dst.lower() not in str(row.get('destIP', '')).lower():
+                            return False
+                        if port and port.lower() not in str(row.get('destPort', '')).lower():
+                            return False
+                        return True
 
-                    if match:
+                    if any(row_satisfies(r) for r in rows):
                         rel_path = os.path.relpath(full_path, current_dir)
                         matching_paths.append(rel_path)
 
                 except Exception:
-                    # If a file cannot be read/parsed we simply ignore it
+                    # ignore files that cannot be read/parsed
                     continue
 
         # -------------------------------------------------
-        # Update the listbox to show only the matches
+        # Update the listbox with only the matching files
         # -------------------------------------------------
-        self.file_listbox.delete(0, tk.END)          # clear current view
+        self.file_listbox.delete(0, tk.END)
         for p in sorted(matching_paths):
             self.file_listbox.insert(tk.END, p)
 
-        # Show a short status message with the criteria used
-        crit_parts = []
-        if src:  crit_parts.append(f'Source="{src}"')
-        if dst:  crit_parts.append(f'Destination="{dst}"')
-        if port: crit_parts.append(f'Port="{port}"')
-        crit_text = ", ".join(crit_parts) if crit_parts else "no criteria"
+        # status message (optional)
+        crit = []
+        if src:  crit.append(f'Source="{src}"')
+        if dst:  crit.append(f'Destination="{dst}"')
+        if port: crit.append(f'Port="{port}"')
         self.status_bar.config(
-            text=f"{len(matching_paths)} file(s) matching: {crit_text}"
-        )
+            text=f"{len(matching_paths)} file(s) matching: {', '.join(crit) or 'no criteria'}")
+
 
 
 
